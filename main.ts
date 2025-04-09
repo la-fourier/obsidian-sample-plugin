@@ -1,7 +1,28 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, SettingTab } from 'obsidian';
 import { chdir } from 'process';
 
 // Remember to rename these classes and interfaces!
+
+import { createWorker, ImageLike } from 'tesseract.js';
+
+/**
+ * Funktion zur Texterkennung mit Tesseract.js
+ * @param imagePath Pfad zum Bild (Screenshot mit Formel)
+ * @returns Erkannter Text und Formeln als Promise
+ */
+async function extractTextFromImage(imagePath: string, lang = 'eng'): Promise<{ text: string }> {
+	try {
+		const worker = await createWorker(lang);
+		const ret = await worker.recognize(imagePath);
+		console.log(ret.data.text);
+		await worker.terminate();
+
+		return { text: ret.data.text };
+	} catch (error) {
+		console.error('Fehler bei der Texterkennung:', error);
+		throw error;
+	}
+}
 
 interface MyPluginSettings {
 	mySetting: string;
@@ -144,6 +165,9 @@ export default class MyPlugin extends Plugin {
 
 		this.app.vault.append(file, clipboard);
 
+		// Dialog, Bilderkennung
+		new SampleModal(this.app).open();
+
 		this.waitForFocusChange();
 	}
 
@@ -196,16 +220,44 @@ export default class MyPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
-
-	async linklitflow() {
-		// wait for pdf+ or clipboard change
-		// 
-	}
 }
 
 class SampleModal extends Modal {
 	constructor(app: App) {
 		super(app);
+		this.setTitle("Environment suggestion");
+
+		let name = '';
+		new Setting(this.contentEl)
+			.setName('Name')
+			.addText((text) =>
+				text.onChange((value) => {
+					name = value;
+				}));
+
+		new Setting(this.contentEl)
+				.setName("test");
+
+		new Setting(this.contentEl)
+			.addButton((btn) =>
+				btn
+					.setButtonText('Submit')
+					.setCta()
+					.onClick(() => {
+						this.close();
+						this.onSubmit(name);
+					}));
+
+		new Setting(this.contentEl)
+			.addButton((btn) =>
+				btn
+					.setButtonText('Cancel')
+					.setCta()
+					.onClick(() => { this.close(); }));
+	}
+
+	onSubmit(name: string) {
+
 	}
 
 	onOpen() {

@@ -1,4 +1,3 @@
-import * as Tesseract from 'tesseract.js';
 import { createWorker, ImageLike } from 'tesseract.js';
 
 /**
