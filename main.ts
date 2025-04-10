@@ -1,10 +1,10 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, SettingTab } from 'obsidian';
-import { traceDeprecation } from 'process';
-
-// Remember to rename these classes and interfaces!
 
 import { createWorker, ImageLike } from 'tesseract.js';
-import { deprecate } from 'util';
+
+import 'texconversion.js';
+
+// TODO renaming, docs schreiben, github repo, settings, clean code, integrate db dataview request  | proof extraction
 
 /**
  * Funktion zur Texterkennung mit Tesseract.js
@@ -20,7 +20,7 @@ async function extractTextFromImage(imagePath: string, lang = 'eng'): Promise<{ 
 
 		// TODO convert math symbols
 
-		return { text: ret.data.text };
+		return { text: replace_all(ret.data.text) };
 	} catch (error) {
 		console.error('Fehler bei der Texterkennung:', error);
 		throw error;
