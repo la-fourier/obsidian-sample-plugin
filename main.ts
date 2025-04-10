@@ -1,9 +1,10 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, SettingTab } from 'obsidian';
-import { chdir } from 'process';
+import { traceDeprecation } from 'process';
 
 // Remember to rename these classes and interfaces!
 
 import { createWorker, ImageLike } from 'tesseract.js';
+import { deprecate } from 'util';
 
 /**
  * Funktion zur Texterkennung mit Tesseract.js
@@ -17,11 +18,25 @@ async function extractTextFromImage(imagePath: string, lang = 'eng'): Promise<{ 
 		console.log(ret.data.text);
 		await worker.terminate();
 
+		// TODO convert math symbols
+
 		return { text: ret.data.text };
 	} catch (error) {
 		console.error('Fehler bei der Texterkennung:', error);
 		throw error;
 	}
+}
+
+async function env_tags_by_text(text: string): Promise<{ env: string, tag: string }> {
+	var tag = "";
+	var env = "";
+
+	tag = text.split(")")[0].replace(" ", "").replace("	", "").replace("(", "");
+	env = text.split(")")[1].split(" ")[0].replace(".", "");
+	if (! (env in ["Lemma", "Definition", "Proposition", "Theorem", "Corollary", "Conjecture"])) {
+		env = "info";
+	}
+	return { env: env, tag: tag };
 }
 
 interface MyPluginSettings {
@@ -48,15 +63,17 @@ export default class MyPlugin extends Plugin {
 			} else {
 				this.ribbon_lit_link?.classList.remove("is-active");
 			}
+
 			while (this.lit_link) {
 				const initialClipboard = await navigator.clipboard.readText();
 				let newClipboard = initialClipboard;
 
 				// console.log("Warte auf Änderungen im Clipboard...");
 				while (newClipboard === initialClipboard && this.lit_link) {
-					await new Promise(resolve => setTimeout(resolve, 400));
+					await new Promise(resolve => setTimeout(resolve, 500));
 					newClipboard = await navigator.clipboard.readText();
 				}
+				console.log("Etwas wurde kopiert :)");
 				await this.link_literature(newClipboard);
 			}
 			console.log(`lit link beendet`);
@@ -158,17 +175,33 @@ export default class MyPlugin extends Plugin {
 		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
 	}
 
-	link_literature(clipboard: string) {
-		let active = this.app.workspace.getActiveFile()!;
+	async link_literature(clipboard: string) {
+		var [imgpath, _, real_link] = clipboard.split("\n");
+		imgpath = imgpath.replace("![[", "").replace("]]", "");
+		var [file_link, properties] = real_link.split("#");
+		file_link = file_link.replace("[[", "");
+		properties = properties.split("|")[0].replace("page=", "").replace("&rect", "_").replace(",", "-");
+		const outline_link = file_link.replace("pdfs/", "lit-outline/").replace(".pdf", "-outline.md");
+		const file = this.app.vault.getFileByPath(outline_link)!;
 
-		const file = this.app.vault.getFileByPath(active.path.replace(".md", "-outline.md"))!;
+		while (!this.app.vault.getFileByPath(imgpath)) {
+			await setTimeout(()=>_, 500);
+		}
 
-		this.app.vault.append(file, clipboard);
+		const newpath = imgpath.replace(".", properties + ".");
+
+		this.app.vault.rename(this.app.vault.getAbstractFileByPath(imgpath)!, newpath); //wird beim Umbenennen auch der Link im log geändert?
+
+		console.log(this.app.lastEvent);
+
+		var { text: text } = await extractTextFromImage(this.app.vault.getAbstractFileByPath(imgpath)!.path);
+		const {env: env, tag: tag} = await env_tags_by_text(text);
+		text = ">[!" + env + "]" + text
+		text = text.split("\n").join("\n> ")
 
 		// Dialog, Bilderkennung
-		new SampleModal(this.app).open();
-
-		this.waitForFocusChange();
+		new SampleModal(this.app, text, clipboard, tag).open();
+		// rest passiert in onSubmit
 	}
 
 	async watchClipboardAndSave() {
@@ -207,7 +240,7 @@ export default class MyPlugin extends Plugin {
 			};
 			window.addEventListener("blur", handleFocus);
 		});
-	}
+	} // seems as not needed
 
 	onunload() {
 
@@ -223,20 +256,30 @@ export default class MyPlugin extends Plugin {
 }
 
 class SampleModal extends Modal {
-	constructor(app: App) {
+	app: App;
+	text: string;
+	clipboard: string;
+	tag: string;
+
+	constructor(app: App, text: string, clipboard: string, tag: string) {
 		super(app);
+		this.app = app;
+		this.text = text;
+		this.clipboard = clipboard;
+		this.tag = tag;
 		this.setTitle("Environment suggestion");
 
-		let name = '';
 		new Setting(this.contentEl)
-			.setName('Name')
-			.addText((text) =>
-				text.onChange((value) => {
-					name = value;
-				}));
+				.setName("on clipboard" + clipboard);
 
 		new Setting(this.contentEl)
-				.setName("test");
+				.setName("Tag: ")
+				.addText((comp) =>
+					comp.onChange((value) => { tag = value }));
+
+		new Setting(this.contentEl)
+				.addTextArea((comp) =>
+					comp.onChange((value) => { text = value}));
 
 		new Setting(this.contentEl)
 			.addButton((btn) =>
@@ -245,10 +288,8 @@ class SampleModal extends Modal {
 					.setCta()
 					.onClick(() => {
 						this.close();
-						this.onSubmit(name);
-					}));
-
-		new Setting(this.contentEl)
+						this.onSubmit();
+					}))
 			.addButton((btn) =>
 				btn
 					.setButtonText('Cancel')
@@ -256,13 +297,22 @@ class SampleModal extends Modal {
 					.onClick(() => { this.close(); }));
 	}
 
-	onSubmit(name: string) {
-
+	waitForFocusChange(): Promise<void> {
+		return new Promise(resolve => {
+			const handleFocus = () => {
+				window.removeEventListener("blur", handleFocus);
+				resolve();
+			};
+			window.addEventListener("blur", handleFocus);
+		});
 	}
 
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.setText('Woah!');
+	onSubmit() {
+		this.waitForFocusChange();
+		// copy to clipboard
+		// log to outline
+		// switch to file in between and pdf again
+		// this.app.workspace.
 	}
 
 	onClose() {
@@ -270,6 +320,14 @@ class SampleModal extends Modal {
 		contentEl.empty();
 	}
 }
+
+
+
+
+
+
+
+
 
 class SampleSettingTab extends PluginSettingTab {
 	plugin: MyPlugin;
