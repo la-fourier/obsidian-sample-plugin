@@ -1,69 +1,149 @@
-# Obsidian Sample Plugin
+# ✨ Condensed Sparkles
+OCR-powered Markdown annotation for academic PDFs – even LaTeX formulas from screenshots!
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+Condensed Sparkles is a powerful Obsidian plugin that extracts structured text (including LaTeX equations) from PDF screenshots using OCR, connects them to your notes, and helps you build semantic outlines from papers in seconds.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+## 🚀 Features
+🔍 Optical Character Recognition (OCR)
+Extract text directly from images and screenshots using tesseract.js
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open Sample Modal" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+Supports mathematical notation and basic LaTeX (custom replacements planned)
 
-## First time developing plugins?
+Fast, lightweight, and works seamlessly with PDF++
 
-Quick starting guide for new plugin devs:
+## 🪄 Automatic Environment Detection
+Recognizes mathematical environments like:
+Theorem, Definition, Lemma, Proposition, Corollary, Conjecture
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+Automatically wraps extracted content with Obsidian Admonitions:
 
-## Releasing new releases
+shell
+Kopieren
+Bearbeiten
+>[!theorem]
+> Let n ∈ ℕ. Then the following holds...
+If no recognized keyword is found, defaults to info.
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+🧷 Clipboard Integration & Live Watch
+Listens for new PDF++ clipboard links (image + location in PDF)
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+Triggers OCR flow once a screenshot is copied
 
-## Adding your plugin to the community plugin list
+Automatically renames the screenshot using location info (page + coordinates)
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+Keeps your media organized and searchable
 
-## How to use
+📝 Semantic Annotation of PDFs
+Annotates your custom outline files (*-outline.md)
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+Adds tags and quotes from screenshots to the outline
 
-## Manually installing the plugin
+Opens a modal for review and editing before inserting
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+Example modal preview (text-based):
 
-## Improve code quality with eslint (optional)
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- To use eslint with this project, make sure to install eslint from terminal:
-  - `npm install -g eslint`
-- To use eslint to analyze this project use this command:
-  - `eslint main.ts`
-  - eslint will then create a report with suggestions for code improvement by file and line number.
-- If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder:
-  - `eslint .\src\`
+less
+Kopieren
+Bearbeiten
+┌────────────────────────────────────────────┐
+│ 📎 Link detected: [[math-paper.pdf#page=3]]│
+│                                            │
+│ 🏷️ Tag: (12)                               │
+│                                            │
+│ >[!definition]                             │
+│ > A prime number is a natural number ...   │
+│                                            │
+│ [Submit]   [Cancel]                        │
+└────────────────────────────────────────────┘
+🧠 Ideal Use Case
+Condensed Sparkles is perfect for:
+
+Researchers reading PDFs
+
+Mathematicians or scientists annotating equations
+
+Students building structured notes from papers
+
+Anyone using PDF++
+
+🛠 Settings (WIP)
+Current:
+
+🔐 Hidden field example (secret input)
+
+Coming soon:
+
+📂 Custom folder paths (PDFs, screenshots, outlines)
+
+🏷️ Custom naming templates for screenshot renaming
+
+🧩 Advanced LaTeX replacement engine
+
+🧭 Typical Workflow
+🎓 Example: You’re reading a math paper and want to capture a theorem from page 3.
+
+🖼️ Take a screenshot using PDF++
+
+📋 The image + link is copied to clipboard
+
+✨ Click the Condensed Sparkles ribbon icon
+
+⏳ The plugin detects the link, performs OCR
+
+🧠 The environment (e.g. "Theorem") is detected
+
+📝 A modal appears, showing the result
+
+🪄 You submit – it appends the content to the corresponding outline file
+
+📁 Screenshot is renamed to reflect PDF location
+
+⚙️ Behind the Scenes
+Uses tesseract.js for OCR
+
+Clipboard is watched in intervals (500ms)
+
+Modal dialog enables review & editing
+
+Screenshot renaming logic based on page/position from PDF++ metadata
+
+Environment parsing uses simple heuristics (keyword detection)
+
+📦 File Structure (Example)
+css
+Kopieren
+Bearbeiten
+📁 PDFs/
+   └─ math-paper.pdf
+📁 lit-outline/
+   └─ math-paper-outline.md
+📁 screenshots/
+   └─ theorem.page_3_213-450.png
+📈 Future Ideas
+📚 BibTeX / Zotero integration
+
+🌍 Multi-language OCR support
+
+🔁 Auto-sync of annotations
+
+📌 Tag suggestion with AI
+
+📐 Better LaTeX parsing and rendering
+
+🤖 Developer Notes
+Class names, settings, and logic have been modularized for future scalability. Currently written in TypeScript using the Obsidian API. To rename the plugin:
+
+Change class MyPlugin to CondensedSparklesPlugin
+
+Update manifest.json with new name, ID, description
+
+Refactor SampleSettingTab → CondensedSparklesSettingTab
+
+💬 Feedback / Issues
+Feel free to open issues or feature requests on GitHub – contributions welcome!
+Let Condensed Sparkles ✨ light up your research notes.
+
+
 
 ## Funding URL
 

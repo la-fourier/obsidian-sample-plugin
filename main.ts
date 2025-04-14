@@ -1,362 +1,207 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, SettingTab } from 'obsidian';
+import {
+  App,
+  Modal,
+  Notice,
+  Plugin,
+  SuggestModal,
+  TFile,
+} from "obsidian";
+import { spawnSync } from "child_process";
 
-import { createWorker, ImageLike } from 'tesseract.js';
+// import "../pdf-plus/main";
+import * as Tesseract from "tesseract.js";
 
-import 'texconversion.js';
+export default class CondensedSparkles extends Plugin {
+  private lastClipboard: string = "";
+  private lit_link: boolean;
+  private ribbon_lit_link: HTMLElement;
 
-// TODO renaming, docs schreiben, github repo, settings, clean code, integrate db dataview request  | proof extraction
+  async onload() {
+    // await this.loadSettings();
+    this.lit_link = false;
 
-/**
- * Funktion zur Texterkennung mit Tesseract.js
- * @param imagePath Pfad zum Bild (Screenshot mit Formel)
- * @returns Erkannter Text und Formeln als Promise
- */
-async function extractTextFromImage(imagePath: string, lang = 'eng'): Promise<{ text: string }> {
-	try {
-		const worker = await createWorker(lang);
-		const ret = await worker.recognize(imagePath);
-		console.log(ret.data.text);
-		await worker.terminate();
+    this.ribbon_lit_link = this.addRibbonIcon('droplets', 'Lit Link', async (evt: MouseEvent) => {
+      this.lit_link = !this.lit_link;
+      if (this.lit_link) {
+        this.ribbon_lit_link?.classList.add("is-active");
+      } else {
+        this.ribbon_lit_link?.classList.remove("is-active");
+      }
+    });
 
-		// TODO convert math symbols
+    console.log("✨ Condensed Sparkles loaded");
 
-		return { text: replace_all(ret.data.text) };
-	} catch (error) {
-		console.error('Fehler bei der Texterkennung:', error);
-		throw error;
-	}
+    // Check clipboard every 1s
+    this.lastClipboard = await navigator.clipboard.readText();
+    this.registerInterval(window.setInterval(() => this.checkClipboard(), 1000));
+
+    this.addCommand({
+      id: 'lit-link-flow',
+      name: 'Link literature',
+      callback: async () => {
+        const clpbd = await navigator.clipboard.readText()!;
+        this.handleClipboard(clpbd);
+      }
+    });
+  }
+
+  onunload() {
+    console.log("🧹 Condensed Sparkles unloaded");
+  }
+
+  async checkClipboard() {
+    if (this.lit_link) {
+      // const content = clipboardy.readSync();
+      const content = await navigator.clipboard.readText();
+      if (content === this.lastClipboard || !this.isValidContent(content)) return;
+
+      this.lastClipboard = content;
+      console.log("📋 Neue strukturierte Zwischenablage erkannt");
+      await this.handleClipboard(content);
+    }
+  }
+
+  isValidContent(content: string): boolean {
+    return content.includes("![[assets/") && content.includes(".jpg]]") &&
+      content.includes("pdf#page=") && content.includes("&rect=");
+  }
+
+  async handleClipboard(content: string) {
+    const vaultRoot = "D:/DATA/v4build/projekte/zettelkasten/";
+
+    const imgMatch = content.match(/!\[\[assets\/(.+?)\.jpg\]\]/);
+    const linkMatch = content.match(/\[\[([a-zA-Z0-9_-]+)\.pdf#page=(\d+)&rect=([\d,]+)\|/);
+
+    if (!imgMatch || !linkMatch) {
+      new Notice("❌ Ungültige Zwischenablage-Struktur.");
+      return;
+    }
+
+    const imgName = imgMatch[1] + ".jpg";
+    const [bookSlug, page, rectStr] = [linkMatch[1], linkMatch[2], linkMatch[3]];
+    const rectSafe = rectStr.replace(/,/g, "-");
+    const newImgName = `${bookSlug}__p${page}__rect-${rectSafe}.jpg`;
+
+    const oldImgPath = `assets/${imgName}`;
+    const newImgPath = `assets/${bookSlug}/${newImgName}`;
+
+    const imgFile = await this.app.vault.getAbstractFileByPath(oldImgPath) as TFile;
+
+    // Erstelle Zielordner, falls nicht vorhanden
+    const targetFolder = `assets/${bookSlug}`;
+    if (!this.app.vault.getAbstractFileByPath(targetFolder)) {
+      await this.app.vault.createFolder(targetFolder);
+    }
+
+    // Verschiebe und benenne Screenshot um
+    await this.app.vault.rename(imgFile, newImgPath);
+
+    // OCR mit Tesseract
+    const absoluteImgPath = vaultRoot + newImgPath;
+    const txtOutputPath = absoluteImgPath.replace(/\.jpg$/, ".txt");
+
+    // const tesseractResult = await Tesseract.recognize(absoluteImgPath, "eng");
+
+    console.log('tesseract "' + absoluteImgPath + '" "' + txtOutputPath + '" -l eng');
+
+    const tesseractResult = await spawnSync('tesseract "' + absoluteImgPath + '" "' + txtOutputPath + '" -l eng');
+
+    console.log(tesseractResult, tesseractResult.status, tesseractResult.stdout);
+
+    if (tesseractResult.status !== 0) {
+      new Notice("❌ OCR mit Tesseract fehlgeschlagen.");
+      // console.error(tesseractResult.stderr?.toString());
+      return;
+    }
+
+    // Lese OCR-Ergebnis (über Vault)
+    const txtVaultPath = newImgPath.replace(/\.jpg$/, ".txt");
+    const txtFile = this.app.vault.getAbstractFileByPath(txtVaultPath) as TFile;
+
+    if (!txtFile) {
+      new Notice("❌ Konnte OCR-Ergebnis nicht finden.");
+      return;
+    }
+
+    const ocrText = await this.app.vault.read(txtFile);
+
+    // const ocrText = tesseractResult.data.text;
+
+    // Zeige OCR-Popup zur Bearbeitung
+    new OcrEditModal(this.app, ocrText, async (editedText) => {
+      // clipboardy.writeSync(editedText);
+      navigator.clipboard.writeText(editedText);
+      new Notice("📎 Text in Zwischenablage gespeichert.");
+
+      // Füge Callout in Outline ein
+      const outlineFilePath = `lit-outline/${bookSlug}-outline.md`;
+      const outlineFile = this.app.vault.getAbstractFileByPath(outlineFilePath) as TFile;
+
+      if (!outlineFile) {
+        new Notice("⚠️ Outline-Datei nicht gefunden.");
+        return;
+      }
+
+      const imgLink = `![[assets/${bookSlug}/${newImgName}]]`;
+      const pdfLink = `[[${bookSlug}.pdf#page=${page}&rect=${rectStr}|Quelle]]`;
+      const snippet = editedText.split("\n").slice(0, 2).join(" ");
+
+      const callout = [
+        `> [!ocr] Automatischer OCR-Ausschnitt`,
+        `> ${imgLink}`,
+        `> ${pdfLink}`,
+        `> 📝 Vorschau: ${snippet.trim()}...`
+      ].join("\n");
+
+      const currentContent = await this.app.vault.read(outlineFile);
+      await this.app.vault.modify(outlineFile, `${currentContent.trim()}\n\n${callout}\n`);
+      new Notice("📝 Outline aktualisiert.");
+    }).open();
+
+    // add to clipboard
+    // navigator.clipboard.
+    // delete old link from outline, write new stuff -> report!
+  }
+
+  // async loadSettings() {
+  // 	this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  // }
+
+  // async saveSettings() {
+  // 	await this.saveData(this.settings);
+  // }
 }
 
-async function env_tags_by_text(text: string): Promise<{ env: string, tag: string }> {
-	var tag = "";
-	var env = "";
-
-	tag = text.split(")")[0].replace(" ", "").replace("	", "").replace("(", "");
-	env = text.split(")")[1].split(" ")[0].replace(".", "");
-	if (! (env in ["Lemma", "Definition", "Proposition", "Theorem", "Corollary", "Conjecture"])) {
-		env = "info";
-	}
-	return { env: env, tag: tag };
-}
-
-interface MyPluginSettings {
-	mySetting: string;
-}
-
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
-
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-	lit_link: boolean;
-	ribbon_lit_link: HTMLElement;
-
-	async onload() {
-		await this.loadSettings();
-		this.lit_link = false;
-
-		this.ribbon_lit_link = this.addRibbonIcon('droplets', 'Lit Link', async (evt: MouseEvent) => {
-			this.lit_link = !this.lit_link;
-			if (this.lit_link) {
-				this.ribbon_lit_link?.classList.add("is-active");
-			} else {
-				this.ribbon_lit_link?.classList.remove("is-active");
-			}
-
-			while (this.lit_link) {
-				const initialClipboard = await navigator.clipboard.readText();
-				let newClipboard = initialClipboard;
-
-				// console.log("Warte auf Änderungen im Clipboard...");
-				while (newClipboard === initialClipboard && this.lit_link) {
-					await new Promise(resolve => setTimeout(resolve, 500));
-					newClipboard = await navigator.clipboard.readText();
-				}
-				console.log("Etwas wurde kopiert :)");
-				await this.link_literature(newClipboard);
-			}
-			console.log(`lit link beendet`);
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
-
-	async onload_() {
-		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('pencil', 'Lit Link', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-			const fs = require('fs');
-			const path = 'orga/forms/task.md';
-
-			fs.appendFile(this.app.vault.getFileByPath(path)!.toString(), '\nHallo!', (err: Error) => {
-				if (err) {
-					console.error('Fehler beim Anhängen an die Datei:', err);
-				} else {
-					console.log('"Hallo!" wurde erfolgreich angehängt.');
-				}
-			});
-
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		// const statusBarItemEl = this.addStatusBarItem();
-		// statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		this.addCommand({
-			id: 'lit-link-worflow',
-			name: 'link literature',
-			editorCallback: () => this.watchClipboardAndSave(),
-			// write to outline
-			// replace img name
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
-
-	async link_literature(clipboard: string) {
-		var [imgpath, _, real_link] = clipboard.split("\n");
-		imgpath = imgpath.replace("![[", "").replace("]]", "");
-		var [file_link, properties] = real_link.split("#");
-		file_link = file_link.replace("[[", "");
-		properties = properties.split("|")[0].replace("page=", "").replace("&rect", "_").replace(",", "-");
-		const outline_link = file_link.replace("pdfs/", "lit-outline/").replace(".pdf", "-outline.md");
-		const file = this.app.vault.getFileByPath(outline_link)!;
-
-		while (!this.app.vault.getFileByPath(imgpath)) {
-			await setTimeout(()=>_, 500);
-		}
-
-		const newpath = imgpath.replace(".", properties + ".");
-
-		this.app.vault.rename(this.app.vault.getAbstractFileByPath(imgpath)!, newpath); //wird beim Umbenennen auch der Link im log geändert?
-
-		console.log(this.app.lastEvent);
-
-		var { text: text } = await extractTextFromImage(this.app.vault.getAbstractFileByPath(imgpath)!.path);
-		const {env: env, tag: tag} = await env_tags_by_text(text);
-		text = ">[!" + env + "]" + text
-		text = text.split("\n").join("\n> ")
-
-		// Dialog, Bilderkennung
-		new SampleModal(this.app, text, clipboard, tag).open();
-		// rest passiert in onSubmit
-	}
-
-	async watchClipboardAndSave() {
-		const initialClipboard = await navigator.clipboard.readText();
-		let newClipboard = initialClipboard;
-
-		// console.log("Warte auf Änderungen im Clipboard...");
-		while (newClipboard === initialClipboard) {
-			await new Promise(resolve => setTimeout(resolve, 400));
-			newClipboard = await navigator.clipboard.readText();
-		}
-
-
-		let active = this.app.workspace.getActiveFile()!;
-
-		console.log(active.basename, active.name, active.path);
-
-		const fileName = `/${active.path}-outline.md`;
-		const filePath = `/${fileName}`;
-		await this.app.vault.create(filePath, newClipboard);
-
-		// this.app.fileManager.renameFile();
-
-		console.log(`Inhalt gespeichert in: ${filePath}`);
-
-		console.log("Warte auf Fensterwechsel...");
-		await this.waitForFocusChange();
-		console.log(`Fenster gewechselt. Datei: ${filePath}`);
-	}
-
-	waitForFocusChange(): Promise<void> {
-		return new Promise(resolve => {
-			const handleFocus = () => {
-				window.removeEventListener("blur", handleFocus);
-				resolve();
-			};
-			window.addEventListener("blur", handleFocus);
-		});
-	} // seems as not needed
-
-	onunload() {
-
-	}
-
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	app: App;
-	text: string;
-	clipboard: string;
-	tag: string;
-
-	constructor(app: App, text: string, clipboard: string, tag: string) {
-		super(app);
-		this.app = app;
-		this.text = text;
-		this.clipboard = clipboard;
-		this.tag = tag;
-		this.setTitle("Environment suggestion");
-
-		new Setting(this.contentEl)
-				.setName("on clipboard" + clipboard);
-
-		new Setting(this.contentEl)
-				.setName("Tag: ")
-				.addText((comp) =>
-					comp.onChange((value) => { tag = value }));
-
-		new Setting(this.contentEl)
-				.addTextArea((comp) =>
-					comp.onChange((value) => { text = value}));
-
-		new Setting(this.contentEl)
-			.addButton((btn) =>
-				btn
-					.setButtonText('Submit')
-					.setCta()
-					.onClick(() => {
-						this.close();
-						this.onSubmit();
-					}))
-			.addButton((btn) =>
-				btn
-					.setButtonText('Cancel')
-					.setCta()
-					.onClick(() => { this.close(); }));
-	}
-
-	waitForFocusChange(): Promise<void> {
-		return new Promise(resolve => {
-			const handleFocus = () => {
-				window.removeEventListener("blur", handleFocus);
-				resolve();
-			};
-			window.addEventListener("blur", handleFocus);
-		});
-	}
-
-	onSubmit() {
-		this.waitForFocusChange();
-		// copy to clipboard
-		// log to outline
-		// switch to file in between and pdf again
-		// this.app.workspace.
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
-}
-
-
-
-
-
-
-
-
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const { containerEl } = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
-
-		// Setting für lit folder
-		// Setting für outline folder
-		// ggf template für name, sonst halt unsauber gecoded
-		// ggf Ordner für Screenshots
-		// ggf template für Screenshotbenennung
-	}
+// class ScreenshotModal extends SuggestModal<TFile> {
+//   getSuggestions(query: string, app: App): TFile[] | Promise<TFile[]> {
+    
+//   }
+// }
+
+class OcrEditModal extends Modal {
+  constructor(app: App, private text: string, private onSave: (edited: string) => void) {
+    super(app);
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "✍️ OCR-Ergebnis bearbeiten" });
+
+    const textarea = contentEl.createEl("textarea", {
+      text: this.text,
+    });
+    textarea.style.width = "100%";
+    textarea.style.height = "300px";
+    textarea.style.marginBottom = "1em";
+
+    const saveBtn = contentEl.createEl("button", { text: "✅ Speichern & übernehmen" });
+    saveBtn.onclick = () => {
+      this.onSave(textarea.value);
+      this.close();
+    };
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
 }
