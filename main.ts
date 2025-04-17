@@ -1,5 +1,6 @@
 import {
   App,
+  Editor,
   Modal,
   Notice,
   Plugin,
@@ -10,6 +11,7 @@ import { spawnSync } from "child_process";
 
 // import "../pdf-plus/main";
 import * as Tesseract from "tesseract.js";
+const fs = require('fs');
 
 export default class CondensedSparkles extends Plugin {
   private lastClipboard: string = "";
@@ -43,6 +45,41 @@ export default class CondensedSparkles extends Plugin {
         this.handleClipboard(clpbd);
       }
     });
+
+    this.addCommand({
+      id: 'llf',
+      name: 'new stuff',
+      editorCallback: async (editor: Editor) => {
+        // change img| NOT self-triggered
+        const clpb = (await navigator.clipboard.readText()).split("\n");
+        const img_name = clpb[0].replace("![[", "").replace("]]", "");
+        const book_name = img_name.split(" ")[0];
+        const properties = clpb[2].split("#")[1].replace("&", "_").replace(",", "-").replace("]]", "").replace("age=", "").replace("rect=", "");
+        const new_name = "assets/"+book_name+"/"+img_name+properties;
+        this.app.vault.rename(this.app.vault.getFileByPath("assets/"+img_name)!, new_name);
+
+        // write to math_file
+        const target = this.app.workspace.getActiveFile()!;
+        editor.replaceRange(clpb.join("\n"), editor.getCursor());
+        const arr = clpb.filter((val, i, arr) => {
+          if (i>2) {
+            return val;
+          }
+        });
+        this.app.vault.rename(target, arr.join("\n"));
+
+        // write to outline
+        const inner_link = "[[ + " + target?.name + "#" + clpb.last() + "]]";
+        const outline_path = "lit-outline/" + book_name + "-outline.md";
+        const outline = this.app.vault.getFileByPath(outline_path)!;
+        const outline_entry = (
+          clpb[3] + "\n" + 
+          "> " + clpb[0] + 
+          "> " + clpb[2] + " -> " + inner_link
+        );
+        this.app.vault.append(outline, outline_entry);
+      }
+    });
   }
 
   onunload() {
@@ -51,7 +88,6 @@ export default class CondensedSparkles extends Plugin {
 
   async checkClipboard() {
     if (this.lit_link) {
-      // const content = clipboardy.readSync();
       const content = await navigator.clipboard.readText();
       if (content === this.lastClipboard || !this.isValidContent(content)) return;
 
@@ -100,32 +136,39 @@ export default class CondensedSparkles extends Plugin {
     const absoluteImgPath = vaultRoot + newImgPath;
     const txtOutputPath = absoluteImgPath.replace(/\.jpg$/, ".txt");
 
-    // const tesseractResult = await Tesseract.recognize(absoluteImgPath, "eng");
+    // this.app.vault.copy(this.app.vault.getFileByPath(absoluteImgPath)!, "C:/");
+    fs.copyFile(absoluteImgPath, 'C:/llf.txt', (err: Error) => {
+      if (err) throw err;
+      console.log('source.txt was copied to destination.txt');
+    });
 
-    console.log('tesseract "' + absoluteImgPath + '" "' + txtOutputPath + '" -l eng');
+    const tesseractResult = await Tesseract.recognize("C:/llf.txt", "eng");
 
-    const tesseractResult = await spawnSync('tesseract "' + absoluteImgPath + '" "' + txtOutputPath + '" -l eng');
+    // console.log('tesseract "' + absoluteImgPath + '" "' + txtOutputPath + '" -l eng');
 
-    console.log(tesseractResult, tesseractResult.status, tesseractResult.stdout);
+    // const tesseractResult = await spawnSync('tesseract "' + absoluteImgPath + '" "' + txtOutputPath + '" -l eng');
+    // console.log(await spawnSync('python test.py'));
 
-    if (tesseractResult.status !== 0) {
-      new Notice("❌ OCR mit Tesseract fehlgeschlagen.");
-      // console.error(tesseractResult.stderr?.toString());
-      return;
-    }
+    // console.log(tesseractResult, tesseractResult.status, tesseractResult.stdout);
 
-    // Lese OCR-Ergebnis (über Vault)
-    const txtVaultPath = newImgPath.replace(/\.jpg$/, ".txt");
-    const txtFile = this.app.vault.getAbstractFileByPath(txtVaultPath) as TFile;
+    // if (tesseractResult.status !== 0) {
+    //   new Notice("❌ OCR mit Tesseract fehlgeschlagen.");
+    //   // console.error(tesseractResult.stderr?.toString());
+    //   return;
+    // }
 
-    if (!txtFile) {
-      new Notice("❌ Konnte OCR-Ergebnis nicht finden.");
-      return;
-    }
+    // // Lese OCR-Ergebnis (über Vault)
+    // const txtVaultPath = newImgPath.replace(/\.jpg$/, ".txt");
+    // const txtFile = this.app.vault.getAbstractFileByPath(txtVaultPath) as TFile;
 
-    const ocrText = await this.app.vault.read(txtFile);
+    // if (!txtFile) {
+    //   new Notice("❌ Konnte OCR-Ergebnis nicht finden.");
+    //   return;
+    // }
 
-    // const ocrText = tesseractResult.data.text;
+    // const ocrText = await this.app.vault.read(txtFile);
+
+    const ocrText = tesseractResult.data.text;
 
     // Zeige OCR-Popup zur Bearbeitung
     new OcrEditModal(this.app, ocrText, async (editedText) => {
